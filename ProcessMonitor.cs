@@ -34,7 +34,7 @@ namespace KernelTraceScout
             {
                 using (p)
                 {
-                    var row = new ProcessRow { Status = "Erste Messung – noch kein Intervall" };
+                    var row = new ProcessRow { Status = "First sample - waiting for next interval" };
                     try
                     {
                         row.Pid = p.Id; row.Name = p.ProcessName;
@@ -62,10 +62,10 @@ namespace KernelTraceScout
                                 state.Consecutive = suspect ? old.Consecutive + 1 : 0;
                                 row.Status = !eligible ? "System/Tool overhead — not ranked as culprit" :
                                     state.Valid < settings.MinimumValidSamples || state.Duration < settings.MinimumObservationSeconds ?
-                                    "Collecting data: " + state.Valid + "/" + settings.MinimumValidSamples + " intervals, " + state.Duration.ToString("F1") + "/" + settings.MinimumObservationSeconds + " s" :
+                                    "Collecting samples: " + state.Valid + "/" + settings.MinimumValidSamples + " intervals, " + state.Duration.ToString("F1") + "/" + settings.MinimumObservationSeconds + " s" :
                                     !suspect ? "Below threshold" :
                                     (state.Consecutive >= settings.StrongSuspiciousSamples ? "Highly suspicious" : "Suspicious") +
-                                    ": Kernel " + row.Kernel.ToString("F1") + "% system CPU; share " + row.Share.ToString("F0") + "%; ratio " +
+                                    ": Kernel " + row.Kernel.ToString("F1") + "% system CPU; kernel share " + row.Share.ToString("F0") + "%; ratio " +
                                     (double.IsPositiveInfinity(row.Ratio) ? "no user CPU" : row.Ratio.ToString("F1") + ":1");
                             }
                         }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -369,7 +369,7 @@ namespace KernelTraceScout
             internal readonly Stopwatch Clock = Stopwatch.StartNew();
             internal CancellationToken Cancellation;
             internal Exception Error;
-            internal int Frames, Records, Invalid, ImageFailures;
+            internal int Frames, Records, Invalid, ImageFailures, DroppedStacks;
             internal uint Lost;
             internal int PointerSize;
             internal readonly HashSet<int> ChangingPids = new HashSet<int>();
@@ -413,7 +413,13 @@ namespace KernelTraceScout
                         int length = r.UserDataLength;
                         if (length < 16 + width || (length - 16) % width != 0 || (length - 16) / width > 192) { Invalid++; return; }
                         int count = (length - 16) / width;
-                        if (Stacks.Count >= 250000 || Frames + count > 2000000) throw new InvalidDataException("Stack memory budget exceeded.");
+                        // SEMANTIC ANCHOR: Retain the finite stack-memory budget without aborting
+                        // DPC/ISR and image decoding. Discard excess stacks and report reduced coverage.
+                        if (Stacks.Count >= 250000 || Frames + count > 2000000)
+                        {
+                            DroppedStacks++;
+                            return;
+                        }
                         byte[] b = new byte[length]; Marshal.Copy(r.UserData, b, 0, length);
                         ulong[] addresses = new ulong[count];
                         for (int i = 0; i < count; i++) addresses[i] = Address(b, 16 + i * width, width);
@@ -523,9 +529,35 @@ namespace KernelTraceScout
             var result = Aggregate(consumer.Profiles, consumer.Stacks, consumer.Modules, suspicious, logfile.Header.PerfFreq, Math.Max(captureLost, Math.Max(consumer.Lost, logfile.Header.EventsLost + logfile.Header.BuffersLost)), cancellation, consumer.Interrupts);
             result.DpcEventCount = consumer.Interrupts.Count(e => !e.IsIsr);
             result.IsrEventCount = consumer.Interrupts.Count(e => e.IsIsr);
-            result.Quality += " DPC events: " + result.DpcEventCount + "; ISR events: " + result.IsrEventCount + "; unmapped DPC/ISR events: " + result.UnmappedInterruptCount + "; invalid records: " + consumer.Invalid + "; unreadable image records: " + consumer.ImageFailures + "; process decoding failures: " + consumer.ProcessFailures + "; stack records excluded due to PID changes: " + lifecycleExcluded + ".";
-            if (consumer.Invalid > 0 || consumer.ImageFailures > 0 || consumer.ProcessFailures > 0)
-                foreach (var d in result.Drivers) { d.Level = "Incomplete (decoding errors)"; d.Explanation += " Decoding errors prevent a reliable ranking."; }
+            // Decoder errors are global counters, not proof that every driver attribution is bad.
+            result.Quality += " DPC events: " + result.DpcEventCount + "; ISR events: " + result.IsrEventCount
+                + "; unmapped DPC/ISR events: " + result.UnmappedInterruptCount
+                + "; invalid records: " + consumer.Invalid
+                + "; unreadable image records: " + consumer.ImageFailures
+                + "; process metadata decoding failures: " + consumer.ProcessFailures
+                + "; stack records excluded due to PID reuse: " + lifecycleExcluded
+                + "; stack records omitted at memory limit: " + consumer.DroppedStacks + ".";
+            if (consumer.DroppedStacks > 0)
+            {
+                result.Quality += " Warning: stack collection reached its memory limit; process/driver correlations are based on a partial stack sample and may miss later activity.";
+                foreach (var driver in result.Drivers)
+                {
+                    if (driver.Processes != null && driver.Processes.Count > 0)
+                    {
+                        driver.Explanation += " Warning: stack sampling was truncated by the memory limit; process attribution is incomplete.";
+                        if (driver.DpcCount + driver.IsrCount == 0)
+                            driver.Level = "Incomplete stack coverage";
+                    }
+                }
+            }
+            if (consumer.Invalid > 0 || consumer.ImageFailures > 0)
+            {
+                result.Quality += " Warning: some event or image metadata could not be decoded. Driver coverage and ranking may be incomplete.";
+                foreach (var driver in result.Drivers)
+                    driver.Explanation += " Warning: trace-wide decoding errors may leave some driver attribution incomplete; the displayed DPC/ISR timings are from successfully decoded events only.";
+            }
+            if (consumer.ProcessFailures > 0)
+                result.Quality += " Warning: process metadata decoding failed for some records; process correlation may be incomplete. This alone does not invalidate directly attributed DPC/ISR timings.";
             result.ReportPath = Path.ChangeExtension(etlPath, ".stack-report.txt");
             // Report failure must not discard the in-app evidence already computed.
             try
@@ -621,11 +653,11 @@ namespace KernelTraceScout
                 int affected = g.Count(e => suspicious.Contains(e.Pid));
                 bool repeated = g.Any(e => e.TimeBuckets >= 3);
                 double share = denominator == 0 ? 0 : 100.0 * count / denominator;
-                string level = lost > 0 ? "Incomplete capture" : count < 30 ? "Insufficient stacks" :
+                string level = lost > 0 ? "Incomplete trace" : count < 30 ? "Insufficient stack samples" :
                     affected >= 2 && leaf >= 30 && share >= 20 && repeated ? "High" :
-                    affected >= 1 && repeated && count >= 50 ? "Moderate stack clue" : "Stack involvement only";
+                    affected >= 1 && repeated && count >= 50 ? "Moderate stack evidence" : "Stack presence only";
                 var driver = new RankedDriver { Name = g.Key, Samples = count, LeafSamples = leaf, AffectedProcesses = affected, Share = share, Level = level, Processes = g.ToList() };
-                driver.Explanation = count + " kernel stack samples; " + leaf + " samples with instruction directly in this module; " + affected + " suspicious processes. Stack share " + share.ToString("F1", CultureInfo.InvariantCulture) + "% of correlated kernel samples. This is statistical stack evidence, not proof of causation.";
+                driver.Explanation = count + " kernel stack samples; " + leaf + " samples with an instruction address in this module; " + affected + " flagged processes. Stack share: " + share.ToString("F1", CultureInfo.InvariantCulture) + "% of correlated kernel samples. This is statistical stack evidence, not proof of causation.";
                 ranked[g.Key] = driver;
             }
             if (interrupts != null && frequency > 0)
@@ -662,13 +694,13 @@ namespace KernelTraceScout
             {
                 if (driver.DpcCount + driver.IsrCount > 0)
                 {
-                    driver.Level = lost > 0 ? "Directly measured; incomplete trace" : "Direct DPC/ISR time";
-                    driver.Explanation = "Routine address belongs directly to this driver module. DPC: " + driver.DpcCount + " calls, " + driver.DpcMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms total, longest " + driver.MaxDpcMicroseconds.ToString("F1", CultureInfo.InvariantCulture) + " us, above 100 us: " + driver.LongDpcCount + ". ISR: " + driver.IsrCount + " calls, " + driver.IsrMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms total, longest " + driver.MaxIsrMicroseconds.ToString("F1", CultureInfo.InvariantCulture) + " us, above 25 us: " + driver.LongIsrCount + ".";
+                    driver.Level = lost > 0 ? "Directly measured; trace incomplete" : "Direct DPC/ISR time";
+                    driver.Explanation = "Routine address mapped directly to this driver module. DPC: " + driver.DpcCount + " calls, " + driver.DpcMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms total, longest " + driver.MaxDpcMicroseconds.ToString("F1", CultureInfo.InvariantCulture) + " us, calls >100 us: " + driver.LongDpcCount + ". ISR: " + driver.IsrCount + " calls, " + driver.IsrMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms total, longest " + driver.MaxIsrMicroseconds.ToString("F1", CultureInfo.InvariantCulture) + " us, calls >25 us: " + driver.LongIsrCount + ".";
                 }
                 else if (driver.Explanation == null)
                 {
-                    driver.Level = lost > 0 ? "Incomplete capture" : "Stack involvement only";
-                    driver.Explanation = "This module appears in kernel stacks but not as a directly attributed DPC/ISR routine. Stack involvement alone does not establish causation.";
+                    driver.Level = lost > 0 ? "Incomplete trace" : "Stack presence only";
+                    driver.Explanation = "This module appears in kernel stacks but not as a directly attributed DPC/ISR routine. Stack presence alone does not establish causation.";
                 }
                 result.Drivers.Add(driver);
             }
@@ -679,7 +711,7 @@ namespace KernelTraceScout
                 c = b.LeafSamples.CompareTo(a.LeafSamples);
                 return c != 0 ? c : b.Samples.CompareTo(a.Samples);
             });
-            result.Quality = "Kernel CPU profile samples: " + profiles.Count + "; correlated kernel stacks: " + denominator + "; DPC/ISR events: " + (interrupts == null ? 0 : interrupts.Count) + "; lost events/buffers: " + lost + ". Stack shares overlap and are not CPU percentages. DPC/ISR time is attributed to a loaded .sys module using the routine address. Missing stack/image data and lost events limit attribution.";
+            result.Quality = "Kernel CPU profile samples: " + profiles.Count + "; correlated kernel stacks: " + denominator + "; DPC/ISR events: " + (interrupts == null ? 0 : interrupts.Count) + "; lost events/buffers: " + lost + ". Stack shares are overlapping samples, not CPU percentages. DPC/ISR timings are attributed to loaded .sys modules by routine address. Missing stack/image data and losses may limit attribution.";
             return result;
         }
         private static Module Resolve(Module[] modules, ulong address, uint pid, long time)

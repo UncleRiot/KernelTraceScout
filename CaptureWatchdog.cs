@@ -15,7 +15,7 @@ namespace KernelTraceScout
         internal static void Start(Guid guid, ulong sessionHandle, int seconds)
         {
             using (var parent = Process.GetCurrentProcess())
-            using (var child = Process.Start(new ProcessStartInfo(System.Windows.Forms.Application.ExecutablePath)
+            using (var child = Process.Start(new ProcessStartInfo(Environment.ProcessPath)
             {
                 UseShellExecute = false, CreateNoWindow = true,
                 Arguments = "--watch-etw " + guid.ToString("D") + " " + parent.Id.ToString(CultureInfo.InvariantCulture) + " " + parent.StartTime.ToUniversalTime().Ticks.ToString(CultureInfo.InvariantCulture) + " " + seconds.ToString(CultureInfo.InvariantCulture) + " " + sessionHandle.ToString(CultureInfo.InvariantCulture),

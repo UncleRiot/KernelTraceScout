@@ -8,6 +8,7 @@
   <MinimumValidSamples>3</MinimumValidSamples>
   <MinimumObservationSeconds>5</MinimumObservationSeconds>
   <StrongSuspiciousSamples>3</StrongSuspiciousSamples>
+  <DarkMode>true</DarkMode>
   <CaptureSeconds>30</CaptureSeconds>
   <MaximumTraceMegabytes>128</MaximumTraceMegabytes>
 </AppSettings>
