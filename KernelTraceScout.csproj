@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!-- SSOT: .NET Framework 4.8 is the default; -p:BuildNet10=true enables the future build. -->
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework Condition="'$(BuildNet10)' != 'true'">net48</TargetFramework>
+    <TargetFramework Condition="'$(BuildNet10)' == 'true'">net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>7.3</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Icons\KernelTraceScout.ico</ApplicationIcon>
+    <StartupObject>KernelTraceScout.Program</StartupObject>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Platforms>x64</Platforms>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Icons\Analyze.png" LogicalName="KernelTraceScout.Icons.Analyze.png" />
+    <EmbeddedResource Include="Icons\CheckOnce.png" LogicalName="KernelTraceScout.Icons.CheckOnce.png" />
+    <EmbeddedResource Include="Icons\Export.png" LogicalName="KernelTraceScout.Icons.Export.png" />
+    <EmbeddedResource Include="Icons\KernelTraceScout.ico" LogicalName="KernelTraceScout.Icons.KernelTraceScout.ico" />
+    <EmbeddedResource Include="Icons\Reload.png" LogicalName="KernelTraceScout.Icons.Reload.png" />
+    <EmbeddedResource Include="Icons\Test.png" LogicalName="KernelTraceScout.Icons.Test.png" />
+    <EmbeddedResource Include="Icons\Pause.png" LogicalName="KernelTraceScout.Icons.Pause.png" />
+    <EmbeddedResource Include="Icons\Play.png" LogicalName="KernelTraceScout.Icons.Play.png" />
+    <EmbeddedResource Include="Icons\Stop.png" LogicalName="KernelTraceScout.Icons.Stop.png" />
+    <Compile Include="Program.cs" />
+    <Compile Include="NativeEtw.cs" />
+    <Compile Include="ProcessMonitor.cs" />
+    <Compile Include="CaptureWatchdog.cs" />
+    <Compile Include="ProfilePrivilege.cs" />
+    <None Update="KernelTraceScout.config.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

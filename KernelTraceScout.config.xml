@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AppSettings>
+  <KernelThresholdPercent>75</KernelThresholdPercent>
+  <RefreshIntervalSeconds>2</RefreshIntervalSeconds>
+  <MinimumKernelCpuPercent>5</MinimumKernelCpuPercent>
+  <MinimumKernelMilliseconds>50</MinimumKernelMilliseconds>
+  <MinimumKernelUserRatio>3</MinimumKernelUserRatio>
+  <MinimumValidSamples>3</MinimumValidSamples>
+  <MinimumObservationSeconds>5</MinimumObservationSeconds>
+  <StrongSuspiciousSamples>3</StrongSuspiciousSamples>
+  <CaptureSeconds>30</CaptureSeconds>
+  <MaximumTraceMegabytes>128</MaximumTraceMegabytes>
+</AppSettings>

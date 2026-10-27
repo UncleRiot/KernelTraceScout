@@ -1,0 +1,28 @@
+PASS: x64 Marshal sizes and critical field offsets
+PASS: near-zero CPU with infinite ratio is not suspicious
+PASS: substantial kernel-dominant work is suspicious
+PASS: minimum absolute kernel time enforced
+PASS: NaN configuration rejected
+PASS: unaligned/truncated StackWalk payload rejected before reads
+PASS: documented StackWalk fields decoded with 64-bit frames
+PASS: raw CPU profile timestamp and payload thread match stack key
+PASS: short CPU profile rejected
+PASS: frame budget stops callback collection
+PASS: cancelled callbacks do not accumulate samples
+PASS: more than 20000 user images do not consume kernel image budget
+PASS: repeated kernel rundown deduplicates across process IDs
+PASS: kernel unload closes the global lifetime
+PASS: kernel reload creates a distinct lifetime
+PASS: end rundown does not invent a prior lifetime
+PASS: hard kernel lifetime limit remains enforced
+PASS: unloaded driver excluded from later sample timestamps
+PASS: sampled instruction residence and cross-process count
+PASS: caller participation is not exclusive CPU residence
+PASS: repeated multi-process CPU evidence can reach high suspicion
+PASS: unresolved samples remain in denominator
+PASS: recursive frames and split stack records count once per sample
+PASS: loss suppresses strong ranking
+PASS: stacks without exact CPU timestamp/thread match are not attributed
+PASS: ambiguous image ranges remain unresolved
+PASS: aggregation cancellation honored
+All 27 assertions passed. Native Windows API execution was NOT tested.

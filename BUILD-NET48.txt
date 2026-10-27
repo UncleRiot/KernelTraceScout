@@ -1,0 +1,10 @@
+KernelTraceScout source update — build instructions
+
+This archive intentionally contains no EXE or prebuilt test binary.
+Build on Windows with Visual Studio 2022, the Desktop development with .NET workload,
+and the .NET Framework 4.8 targeting pack. Open KernelTraceScout.sln, select Release / x64,
+and build. Then run KernelTraceScout.exe from the Release output folder.
+
+To build and run the deterministic test executable, build KernelTraceScout.Tests.csproj
+in Release / x64 and run the generated KernelTraceScout.Tests.exe.
+The native ETW capture still requires Windows x64 and administrator rights.
