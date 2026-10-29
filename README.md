@@ -3,6 +3,20 @@
 **Source update only. No rebuilt executable is included.**
 Build it on Windows with the .NET Framework 4.8 targeting pack before running it.
 
+
+<img width="1467" height="821" alt="grafik" src="https://github.com/user-attachments/assets/bd46b2a1-af50-4620-80ae-a3b415a95ef2" />
+
+
+---
+
+
+<img width="1467" height="821" alt="grafik" src="https://github.com/user-attachments/assets/a14f8ef9-b8c4-43c4-a602-1f069e476fed" />
+
+
+---
+
+
+
 ## Run and see an analysis
 
 1. Open `KernelTraceScout.sln` in Visual Studio 2022, select **Release / x64**, and
