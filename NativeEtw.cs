@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Diagnostics;
@@ -334,7 +334,7 @@ namespace KernelTraceScout
         {
             internal int Pid, SampleCount, LeafCount, TimeBuckets;
             internal string ModuleName, ExampleStack;
-            internal double ShareOfProcessStacks;
+            internal double ShareOfProcessStacks, ShareOfProcessCpuSamples;
         }
         internal sealed class InterruptObservation
         {
@@ -357,6 +357,8 @@ namespace KernelTraceScout
             internal readonly List<ModuleEvidence> Evidence = new List<ModuleEvidence>();
             internal readonly List<RankedDriver> Drivers = new List<RankedDriver>();
             internal int DpcEventCount, IsrEventCount, UnmappedInterruptCount;
+            internal bool MetadataDecodeWarnings;
+            internal int CoreDecodeErrors;
         }
         // SEMANTIC ANCHOR: Finite file/event/frame budgets. Callbacks never throw across native frames.
         // RAW_TIMESTAMP is required: StackWalk payload contains the original profile timestamp.
@@ -369,11 +371,12 @@ namespace KernelTraceScout
             internal readonly Stopwatch Clock = Stopwatch.StartNew();
             internal CancellationToken Cancellation;
             internal Exception Error;
-            internal int Frames, Records, Invalid, ImageFailures, DroppedStacks;
+            internal int Frames, Records, Invalid, ImageFailures, InterruptDecodeFailures;
             internal uint Lost;
             internal int PointerSize;
             internal readonly HashSet<int> ChangingPids = new HashSet<int>();
             internal int ProcessFailures;
+            internal int ProcessStartEvents, ProcessStopEvents;
             internal void OnEvent(IntPtr pointer)
             {
                 if (Error != null) return;
@@ -398,7 +401,7 @@ namespace KernelTraceScout
                             Interrupts.Add(new InterruptObservation { IsIsr = opcode == 67, Routine = routine, StartTime = (long)initial, EndTime = r.Header.TimeStamp });
                         }
                         catch (Exception ex) when (ex is Win32Exception || ex is InvalidDataException || ex is OverflowException)
-                        { Invalid++; }
+                        { Invalid++; InterruptDecodeFailures++; }
                     }
                     if (provider == ProfileGuid && opcode == 46)
                     {
@@ -413,13 +416,7 @@ namespace KernelTraceScout
                         int length = r.UserDataLength;
                         if (length < 16 + width || (length - 16) % width != 0 || (length - 16) / width > 192) { Invalid++; return; }
                         int count = (length - 16) / width;
-                        // SEMANTIC ANCHOR: Retain the finite stack-memory budget without aborting
-                        // DPC/ISR and image decoding. Discard excess stacks and report reduced coverage.
-                        if (Stacks.Count >= 250000 || Frames + count > 2000000)
-                        {
-                            DroppedStacks++;
-                            return;
-                        }
+                        if (Stacks.Count >= 250000 || Frames + count > 2000000) throw new InvalidDataException("Stack memory budget exceeded.");
                         byte[] b = new byte[length]; Marshal.Copy(r.UserData, b, 0, length);
                         ulong[] addresses = new ulong[count];
                         for (int i = 0; i < count; i++) addresses[i] = Address(b, 16 + i * width, width);
@@ -431,7 +428,11 @@ namespace KernelTraceScout
                         try
                         {
                             ulong id = EtwNative.Number(EtwNative.Property(pointer, "ProcessId"));
-                            if (id <= int.MaxValue) ChangingPids.Add((int)id);
+                            if (id <= int.MaxValue)
+                            {
+                                ChangingPids.Add((int)id);
+                                if (opcode == 1) ProcessStartEvents++; else ProcessStopEvents++;
+                            }
                         }
                         catch (Win32Exception) { ProcessFailures++; }
                     }
@@ -526,38 +527,45 @@ namespace KernelTraceScout
             // PID-only correlation is unsafe across a lifecycle change. Exclude such PIDs
             // completely rather than merge unrelated process instances under one label.
             int lifecycleExcluded = consumer.Stacks.RemoveAll(s => s.Pid <= int.MaxValue && consumer.ChangingPids.Contains((int)s.Pid));
+            // Conservative PID-only safeguard: the observed start/stop event does not
+            // prove a recycled PID, but the identity cannot safely be correlated.
+            int lifecyclePids = consumer.ChangingPids.Count;
             var result = Aggregate(consumer.Profiles, consumer.Stacks, consumer.Modules, suspicious, logfile.Header.PerfFreq, Math.Max(captureLost, Math.Max(consumer.Lost, logfile.Header.EventsLost + logfile.Header.BuffersLost)), cancellation, consumer.Interrupts);
             result.DpcEventCount = consumer.Interrupts.Count(e => !e.IsIsr);
             result.IsrEventCount = consumer.Interrupts.Count(e => e.IsIsr);
-            // Decoder errors are global counters, not proof that every driver attribution is bad.
-            result.Quality += " DPC events: " + result.DpcEventCount + "; ISR events: " + result.IsrEventCount
-                + "; unmapped DPC/ISR events: " + result.UnmappedInterruptCount
-                + "; invalid records: " + consumer.Invalid
-                + "; unreadable image records: " + consumer.ImageFailures
-                + "; process metadata decoding failures: " + consumer.ProcessFailures
-                + "; stack records excluded due to PID reuse: " + lifecycleExcluded
-                + "; stack records omitted at memory limit: " + consumer.DroppedStacks + ".";
-            if (consumer.DroppedStacks > 0)
-            {
-                result.Quality += " Warning: stack collection reached its memory limit; process/driver correlations are based on a partial stack sample and may miss later activity.";
-                foreach (var driver in result.Drivers)
-                {
-                    if (driver.Processes != null && driver.Processes.Count > 0)
-                    {
-                        driver.Explanation += " Warning: stack sampling was truncated by the memory limit; process attribution is incomplete.";
-                        if (driver.DpcCount + driver.IsrCount == 0)
-                            driver.Level = "Incomplete stack coverage";
-                    }
-                }
-            }
-            if (consumer.Invalid > 0 || consumer.ImageFailures > 0)
-            {
-                result.Quality += " Warning: some event or image metadata could not be decoded. Driver coverage and ranking may be incomplete.";
-                foreach (var driver in result.Drivers)
-                    driver.Explanation += " Warning: trace-wide decoding errors may leave some driver attribution incomplete; the displayed DPC/ISR timings are from successfully decoded events only.";
-            }
-            if (consumer.ProcessFailures > 0)
-                result.Quality += " Warning: process metadata decoding failed for some records; process correlation may be incomplete. This alone does not invalidate directly attributed DPC/ISR timings.";
+            result.Quality += " DPC events: " + result.DpcEventCount + "; ISR events: " + result.IsrEventCount + "; unmapped DPC/ISR events: " + result.UnmappedInterruptCount + "; invalid records: " + consumer.Invalid + "; unreadable image records: " + consumer.ImageFailures + "; process decode failures: " + consumer.ProcessFailures + "; stack records excluded due to process lifecycle ambiguity: " + lifecycleExcluded + "; affected PIDs: " + lifecyclePids + ".";
+            // A failed optional process/image/interrupt metadata decode must not erase
+            // independently measured DPC/ISR routine time or matched CPU samples.
+            // Surface diagnostic quality separately; only corrupted core CPU/stack
+            // records or ETW loss globally prevent strong attribution.
+            int coreInvalid = Math.Max(0, consumer.Invalid - consumer.InterruptDecodeFailures);
+            AppLog.Write("ETW decoder diagnostics: CPU profile records=" + consumer.Profiles.Count +
+                "; stack walk records=" + consumer.Stacks.Count +
+                "; correlated stack observations=" + result.StackCount +
+                "; invalid records=" + consumer.Invalid +
+                "; interrupt decode failures=" + consumer.InterruptDecodeFailures +
+                "; image decode failures=" + consumer.ImageFailures +
+                "; process decode failures=" + consumer.ProcessFailures +
+                "; excluded stack records due to process lifecycle ambiguity=" + lifecycleExcluded +
+                "; process lifecycle PIDs=" + lifecyclePids +
+                "; process start events=" + consumer.ProcessStartEvents +
+                "; process stop events=" + consumer.ProcessStopEvents +
+                "; core/other invalid records=" + coreInvalid +
+                "; lost events/buffers=" + result.Lost +
+                "; suspicious PIDs=" + (suspicious == null ? 0 : suspicious.Count));
+            result.CoreDecodeErrors = coreInvalid;
+            // Unattributed malformed records cannot be assigned to every driver.
+            // Keep per-driver rankings; report the global coverage limitation separately.
+            if (coreInvalid > 0)
+                result.Quality += " Global warning: " + coreInvalid +
+                    " invalid core/other records could not be attributed to a specific driver; driver evidence remains provisional.";
+            if (result.Lost > 0)
+                result.Quality += " Global warning: ETW reported lost events/buffers; capture completeness is reduced.";
+            result.MetadataDecodeWarnings = consumer.InterruptDecodeFailures > 0 || consumer.ImageFailures > 0 || consumer.ProcessFailures > 0;
+            if (result.MetadataDecodeWarnings)
+                result.Quality += " Einzelne Metadaten-Dekodierungen fehlgeschlagen (DPC/ISR: " + consumer.InterruptDecodeFailures +
+                    ", images: " + consumer.ImageFailures + ", processes: " + consumer.ProcessFailures +
+                    "). These metadata failures do not invalidate every driver; missing modules may still affect attribution.";
             result.ReportPath = Path.ChangeExtension(etlPath, ".stack-report.txt");
             // Report failure must not discard the in-app evidence already computed.
             try
@@ -621,6 +629,11 @@ namespace KernelTraceScout
                     if (chain.Count < 24) chain.Add(frame);
                     if (module != null && module.File.EndsWith(".sys", StringComparison.OrdinalIgnoreCase)) seen.Add(module.File);
                 }
+                // The sampled instruction pointer is stronger evidence than any caller frame.
+                // Some valid CPU profiles have an incomplete stack; keep their resolved .sys
+                // leaf even when the stack walker did not include the leaf module itself.
+                if (leaf != null && leaf.File.EndsWith(".sys", StringComparison.OrdinalIgnoreCase))
+                    seen.Add(leaf.File);
                 if (seen.Count > 0) result.MatchedStackCount++;
                 foreach (string name in seen)
                 {
@@ -642,6 +655,7 @@ namespace KernelTraceScout
             foreach (var pair in evidence)
             {
                 pair.Value.ShareOfProcessStacks = 100.0 * pair.Value.SampleCount / totals[pair.Value.Pid];
+                pair.Value.ShareOfProcessCpuSamples = 100.0 * pair.Value.LeafCount / totals[pair.Value.Pid];
                 pair.Value.TimeBuckets = buckets[pair.Key].Count;
                 result.Evidence.Add(pair.Value);
             }
@@ -652,12 +666,14 @@ namespace KernelTraceScout
                 int count = g.Sum(e => e.SampleCount), leaf = g.Sum(e => e.LeafCount);
                 int affected = g.Count(e => suspicious.Contains(e.Pid));
                 bool repeated = g.Any(e => e.TimeBuckets >= 3);
+                bool directInAffected = g.Any(e => suspicious.Contains(e.Pid) && e.LeafCount >= 10 && e.TimeBuckets >= 2);
                 double share = denominator == 0 ? 0 : 100.0 * count / denominator;
-                string level = lost > 0 ? "Incomplete trace" : count < 30 ? "Insufficient stack samples" :
+                string level = lost > 0 ? "Incomplete capture" : count < 30 ? "Insufficient stacks" :
                     affected >= 2 && leaf >= 30 && share >= 20 && repeated ? "High" :
+                    directInAffected && leaf >= 20 && repeated ? "Moderate CPU sample evidence" :
                     affected >= 1 && repeated && count >= 50 ? "Moderate stack evidence" : "Stack presence only";
                 var driver = new RankedDriver { Name = g.Key, Samples = count, LeafSamples = leaf, AffectedProcesses = affected, Share = share, Level = level, Processes = g.ToList() };
-                driver.Explanation = count + " kernel stack samples; " + leaf + " samples with an instruction address in this module; " + affected + " flagged processes. Stack share: " + share.ToString("F1", CultureInfo.InvariantCulture) + "% of correlated kernel samples. This is statistical stack evidence, not proof of causation.";
+                driver.Explanation = count + " kernel stack samples; " + leaf + " samples with instruction in this module; " + affected + " suspicious processes. Stack share " + share.ToString("F1", CultureInfo.InvariantCulture) + "% of correlated kernel samples. Statistical stack evidence does not establish causality.";
                 ranked[g.Key] = driver;
             }
             if (interrupts != null && frequency > 0)
@@ -694,13 +710,13 @@ namespace KernelTraceScout
             {
                 if (driver.DpcCount + driver.IsrCount > 0)
                 {
-                    driver.Level = lost > 0 ? "Directly measured; trace incomplete" : "Direct DPC/ISR time";
-                    driver.Explanation = "Routine address mapped directly to this driver module. DPC: " + driver.DpcCount + " calls, " + driver.DpcMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms total, longest " + driver.MaxDpcMicroseconds.ToString("F1", CultureInfo.InvariantCulture) + " us, calls >100 us: " + driver.LongDpcCount + ". ISR: " + driver.IsrCount + " calls, " + driver.IsrMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms total, longest " + driver.MaxIsrMicroseconds.ToString("F1", CultureInfo.InvariantCulture) + " us, calls >25 us: " + driver.LongIsrCount + ".";
+                    driver.Level = lost > 0 ? "Directly measured; incomplete capture" : "Direct DPC/ISR time";
+                    driver.Explanation = "Routine address lies within this driver module. DPC: " + driver.DpcCount + " calls, " + driver.DpcMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms total, longest " + driver.MaxDpcMicroseconds.ToString("F1", CultureInfo.InvariantCulture) + " us, above 100 us: " + driver.LongDpcCount + ". ISR: " + driver.IsrCount + " calls, " + driver.IsrMilliseconds.ToString("F3", CultureInfo.InvariantCulture) + " ms total, longest " + driver.MaxIsrMicroseconds.ToString("F1", CultureInfo.InvariantCulture) + " us, above 25 us: " + driver.LongIsrCount + ".";
                 }
                 else if (driver.Explanation == null)
                 {
-                    driver.Level = lost > 0 ? "Incomplete trace" : "Stack presence only";
-                    driver.Explanation = "This module appears in kernel stacks but not as a directly attributed DPC/ISR routine. Stack presence alone does not establish causation.";
+                    driver.Level = lost > 0 ? "Incomplete capture" : "Stack presence only";
+                    driver.Explanation = "This module appears in kernel stacks but was not directly identified as a DPC/ISR routine. Stack presence alone does not prove causality.";
                 }
                 result.Drivers.Add(driver);
             }
@@ -711,7 +727,7 @@ namespace KernelTraceScout
                 c = b.LeafSamples.CompareTo(a.LeafSamples);
                 return c != 0 ? c : b.Samples.CompareTo(a.Samples);
             });
-            result.Quality = "Kernel CPU profile samples: " + profiles.Count + "; correlated kernel stacks: " + denominator + "; DPC/ISR events: " + (interrupts == null ? 0 : interrupts.Count) + "; lost events/buffers: " + lost + ". Stack shares are overlapping samples, not CPU percentages. DPC/ISR timings are attributed to loaded .sys modules by routine address. Missing stack/image data and losses may limit attribution.";
+            result.Quality = "Kernel CPU profile samples: " + profiles.Count + "; correlated kernel stacks: " + denominator + "; DPC/ISR events: " + (interrupts == null ? 0 : interrupts.Count) + "; lost events/buffers: " + lost + ". Stack shares are overlapping sample evidence, not CPU percentages. DPC/ISR time is attributed through the routine address to loaded .sys modules. Missing stack/image data and losses limit attribution.";
             return result;
         }
         private static Module Resolve(Module[] modules, ulong address, uint pid, long time)

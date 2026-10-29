@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>7.3</LangVersion>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <StartupObject>KernelTraceScout.Tests</StartupObject>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <OutputPath>bin-tests\</OutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="NativeEtw.cs" />
+    <Compile Include="ProcessMonitor.cs" />
+    <Compile Include="LocalSelfTest.cs" />
+    <Compile Include="CaptureWatchdog.cs" />
+    <Compile Include="ProfilePrivilege.cs" />
+    <Compile Include="Tests.cs" />
+  </ItemGroup>
+</Project>
