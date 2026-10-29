@@ -1,144 +1,139 @@
-# KernelTraceScout
+# 🔍 KernelTraceScout
 
-**Source update only. No rebuilt executable is included.**
-Build it on Windows with the .NET Framework 4.8 targeting pack before running it.
+**Find suspicious kernel CPU activity and identify potentially involved Windows drivers.**
 
+KernelTraceScout is a lightweight Windows diagnostic tool that helps investigate unusually high CPU usage in kernel mode.
 
-<img width="1545" height="966" alt="grafik" src="https://github.com/user-attachments/assets/dddb73e3-6cd0-401b-ade6-002e149722e7" />
+Sometimes a process shows high CPU usage even though the underlying workload may originate from a driver, such as an antivirus file-system filter. Windows Task Manager alone often cannot explain this relationship.
 
+**KernelTraceScout helps you:**
+- 📊 Monitor kernel and user CPU usage per process.
+- 🔎 Identify processes with unusual kernel CPU activity.
+- 🧩 Correlate ETW kernel stack samples with potentially involved drivers.
+- 🛡️ Inspect installed file-system minifilters.
+- 💾 Save, load and export diagnostic results.
+- 🧪 Explore an example using the built-in Demo mode.
 
+> **Important:** Driver correlations are diagnostic indications, not definitive proof of causality.
+
+## 📸 Screenshots
+
+![KernelTraceScout – Process overview](https://github.com/user-attachments/assets/dddb73e3-6cd0-401b-ade6-002e149722e7)
+
+![KernelTraceScout – Driver and stack analysis](https://github.com/user-attachments/assets/84cda0c1-7a9c-46dd-9ec3-ee59a226ebfb)
 
 ---
 
+## 🚀 Getting started
 
-<img width="1545" height="966" alt="grafik" src="https://github.com/user-attachments/assets/84cda0c1-7a9c-46dd-9ec3-ee59a226ebfb" />
+**Requirements**
+- Windows with .NET Framework 4.8
+- Administrator privileges for ETW capture
+- Visual Studio 2022 with the .NET Framework 4.8 targeting pack to build from source
 
+Open `KernelTraceScout.sln`, select **Release / x64**, build and start the application.
 
+Without administrator privileges, limited process monitoring remains available.
+
+## 🩺 Example: A process has unusually high kernel CPU usage
+
+Imagine a monitoring process, `Zabbix2.exe`, showing 45% total CPU usage, although its normal workload should be much lower.
+
+**Step 1 — Monitor processes**
+
+Open the **Processes** tab and click **Start auto-refresh**.
+
+KernelTraceScout continuously updates CPU measurements and highlights suspicious activity.
+
+**Step 2 — Capture the problem**
+
+While the high CPU usage occurs, click **Start ETW capture**.
+
+The default capture duration is 30 seconds. KernelTraceScout collects Windows tracing information and analyzes the results.
+
+**Step 3 — Examine the possible driver**
+
+The **Processes** tab shows the strongest correlated driver evidence for each process.
+
+For example:
+
+| Process | Total CPU | Kernel CPU | Driver evidence |
+|---|---:|---:|---|
+| Zabbix2.exe | 45% | 40% | AntivirusFilter.sys |
+| powershell.exe | 28% | 24% | AntivirusFilter.sys |
+
+Both processes may show evidence involving the same driver.
+
+**Step 4 — Review the details**
+
+Open **Driver / Stack Analysis** to inspect sampled driver activity, kernel stacks and related processes.
+
+Use **File System Minifilters** to see which file-system filters are installed.
+
+**Step 5 — Save or share the results**
+
+Save the results for later analysis, export them to CSV, or right-click a table to copy selected rows or the entire table as formatted text or CSV.
+
+> 💡 **Try it yourself:** Click **Demo** to display this fictional scenario alongside the existing measurements. Click Demo again to remove the simulated entries.
 
 ---
 
+## 🧰 Main controls
 
+| Control | Purpose |
+|---|---|
+| ▶️ Start ETW capture | Record and analyze kernel activity |
+| 🔄 Refresh now | Update process measurements once |
+| ⏱️ Start auto-refresh | Monitor CPU usage continuously |
+| 🛡️ Refresh minifilters | Update the file-system filter inventory |
+| 💾 Save / Load results | Store or reopen analysis results |
+| 📋 Export CSV | Export diagnostic data |
+| 🧪 Demo | Show or hide simulated driver-related CPU problems |
+| ✅ Run self-test | Check built-in diagnostic functions |
+| ❔ About | Display version, author, license and project information |
 
-## Run and see an analysis
+## 🎯 How suspicious activity is identified
 
-1. Open `KernelTraceScout.sln` in Visual Studio 2022, select **Release / x64**, and
-   build the app. For ETW, start it as administrator; limited mode can only read
-   process CPU counters.
-2. In **Prozesse**, enable automatic refresh and let it run for at least five seconds.
-   The table is sorted by Kernel-CPU. It shows system-wide CPU percentage, average
-   logical cores consumed, kernel milliseconds per measurement interval, user CPU,
-   and the Kernel:User ratio. The app's own process and PID 4 are omitted here.
-3. The default alert rule is at least 5% of total system CPU in kernel mode per interval,
-   at least 50 ms kernel time, at least 75% kernel share, and a Kernel:User ratio of 3:1.
-   It must persist through three valid intervals and at least five seconds. The rule is
-   visible in the status bar. This is an adjustable diagnostic heuristic, not a Windows
-   standard or a universal definition of excessive CPU.
-4. Start **ETW-Aufzeichnung** while the problem is occurring. After the capture, the app
-   returns to **Prozesse**. The column **ETW-Treiberhinweis pro Prozess** shows the strongest
-   sampled `.sys` module for that process. A CPU sample whose instruction address is inside
-   the module is shown separately from a module that only appears elsewhere in the stack.
-   If the module name matches a currently listed minifilter name, the column says so.
-5. Open **Treiber-/Stack-Auswertung** for module details and related process stacks. Direct
-   DPC/ISR routine time is measured separately and is not the process's file-I/O kernel time.
-   Kernel-stack correlation can point to a minifilter running in a process's kernel call path,
-   but sampling is statistical and does not prove that the filter caused the entire process
-   load. The **Dateisystem-Minifilter** tab is an inventory; being loaded does not prove activity.
-   If ETW reports no correlated stack evidence, the app cannot identify a process's driver from
-   that capture. `System` is not itself presented as the culprit.
+KernelTraceScout considers several factors together, including:
 
-All measurement data displayed during normal use comes from process counters or ETW.
-Deterministic fixtures exist only in the separate test executable.
+- Kernel CPU usage relative to total system capacity
+- Kernel time compared with user time
+- Duration and consistency of the observed activity
+- Available ETW evidence linking processes and drivers
 
-## What counts as long DPC/ISR work
+The default heuristic uses **5% kernel CPU**, **50 ms kernel time per interval**, **75% kernel share**, and a **3:1 kernel/user ratio**, observed over multiple intervals.
 
-Microsoft's driver guidance recommends keeping an individual DPC below 100 µs and an
-individual ISR below 25 µs. The table counts calls that exceed those values. It also
-shows each driver's summed DPC and ISR time, so repeated shorter calls remain visible.
-Those per-call recommendations do not define a universal process-level Kernel-CPU limit.
+These thresholds are diagnostic guidelines, not universal Windows performance limits.
 
-## Configuration
+## ⚠️ Limitations
 
-`KernelTraceScout.config.xml` is next to the EXE. Edit it while the application is closed.
-The threshold, refresh interval and capture duration can also be set in the GUI.
-The file is copied to the build output; an existing file is preserved when newer.
+- High kernel CPU usage does not automatically indicate a faulty driver.
+- A driver appearing in a stack does not prove it caused the CPU load.
+- Missing ETW samples, dropped events and incomplete stack information can reduce accuracy.
+- DPC/ISR measurements are separate from ordinary process kernel CPU usage.
+- KernelTraceScout does not modify drivers, services or security settings.
 
-| Setting | Default | Meaning |
-|---|---:|---|
-| KernelThresholdPercent | 75 | Minimum kernel share of the process's CPU time |
-| RefreshIntervalSeconds | 2 | Regular auto-refresh interval, 1–300 s |
-| MinimumKernelCpuPercent | 5 | Minimum kernel CPU as a percentage of total system capacity |
-| MinimumKernelMilliseconds | 50 | Absolute kernel CPU time in the measured interval |
-| MinimumKernelUserRatio | 3 | Kernel/User time ratio |
-| MinimumValidSamples | 3 | Valid measurement intervals before classification |
-| MinimumObservationSeconds | 5 | Minimum accumulated observation duration |
-| StrongSuspiciousSamples | 3 | Consecutive anomalous intervals for strong suspicion |
-| CaptureSeconds | 30 | User-started capture duration, 5–120 s |
-| MaximumTraceMegabytes | 128 | ETL size cap, 16–256 MiB |
+## ⚙️ Configuration
 
-Zero user time is shown as “kein User-CPU”; the UI does not show Infinity. A ratio
-alone cannot trigger an alert. PID and creation time identify a live process;
-ETW PIDs with observed creation/exit events are conservatively excluded from evidence.
-Process names are attached only when the captured and live creation times match.
+Application settings are stored in `KernelTraceScout.config.xml`, next to the executable.
 
-## Capture and analysis limits
+Key parameters such as capture duration, refresh interval and kernel CPU threshold can be adjusted in the application.
 
-- One stable, application-specific system logger name; no replacement of existing sessions.
-- No capture until the user starts it. Independent system logger support requires at least
-  Windows 8 / Server 2012. These are API minima, not a claim of current OS support or validation.
-- At most 120 s per capture and 256 MiB ETL, sequential mode (stops at file limit).
-- Requested 64 KiB native buffers: two per logical processor, minimum eight; capture refused
-  above 256 active logical processors. Windows can adjust buffer settings.
-- Watchdog is a second instance of this same EXE, not a third-party program. It monitors the
-  parent's identity and deadline, queries the fixed session name, checks its random GUID,
-  and only stops the original successfully-created session handle. It does not stop processes.
-- GUI shutdown waits for capture cleanup and cancels analysis. A thread-pool deadline also
-  stops the session if the GUI thread is busy. If both application and watchdog are forcibly
-  killed, cleanup is not guaranteed; the ETL file cap still limits disk growth. Never stop an
-  unknown session merely because it has a similar name.
-- No registry, driver, service, security software, sampling-frequency or account-policy changes.
-  SeSystemProfilePrivilege is enabled temporarily in the application's existing access token
-  and restored after setup. Failure is reported.
-- Decode limits: 257 MiB input; 4 million events; 250,000 CPU profiles; 250,000 stack events;
-  250,000 DPC/ISR events;
-  2 million stored frame addresses; 20,000 deduplicated kernel-image lifetime records; 10,000 evidence entries.
-- Consumer processing budget 90 s plus aggregation budget 30 s; cancellation checked in
-  callbacks and aggregation. These are cooperative budgets, not a hard OS CPU quota or a
-  guarantee that a blocking Windows API call returns within the budget.
-- Retention keeps three prior ETLs before starting a new capture (four including the new one),
-  associated reports, seven days of text logs, and a 2 MiB current/previous rotation per log date.
-  Reports are limited to approximately 15 MiB. Failed retention prevents a new capture.
-- ETW buffers may be lost. Unknown schemas, malformed records and loss prevent strong ranking.
-  Image data is decoded by Windows TDH, never by guessed version-dependent string offsets.
-  Image unload timestamps and ambiguous overlapping ranges are respected.
-- Symbol functions are not resolved. Frames show module names and hexadecimal offsets.
-  Windows paging, missing image metadata, sample limits and truncated stacks can prevent
-  driver identification. No registry setting is changed to force stack availability.
+## 🛠️ Build from source
 
-## Build
+Open the solution in **Visual Studio 2022**, select **Release / x64** and build with the **.NET Framework 4.8 targeting pack** installed.
 
-Visual Studio 2022 with .NET Framework 4.8 targeting pack and desktop development workload:
-open `KernelTraceScout.sln`, choose Release / x64 and build. This source package omits
-the executable so an older binary cannot be mistaken for the updated build.
-The project has no third-party NuGet dependencies. A non-Windows cross-build may restore
-Microsoft reference assemblies as build-time dependencies; these are not shipped with the app.
+This source distribution does not include a rebuilt executable.
 
-CLI with a suitable .NET SDK and targeting packs:
+The project does not declare third-party NuGet dependencies.
 
-```text
-dotnet build KernelTraceScout.csproj -c Release -m:1
-dotnet build KernelTraceScout.Tests.csproj -c Release -m:1
-bin-tests\net48\KernelTraceScout.Tests.exe
-```
+For detailed technical limitations and verification information, see `VERIFICATION.md`.
 
-Optional .NET 10 build (requires the .NET 10 SDK; its supported Windows runtime is required):
+## 📄 License & Author
 
-```text
-dotnet build KernelTraceScout.csproj -c Release -m:1 -p:BuildNet10=true
-```
+- **License:** [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.html)
+- **Author:** Daniel Capilla
+- **Copyright:** © 2026 Daniel Capilla
+- **GitHub:** [UncleRiot/KernelTraceScout](https://github.com/UncleRiot/KernelTraceScout)
 
-No complete redevelopment is required for the second target. Its Windows runtime behavior
-has not been tested. Launch its generated EXE apphost to support same-EXE watchdog startup.
-`VerifyEtwLayouts.cpp` contains a separate Windows SDK C++ static-assert probe. It is not an
-application dependency and was not compiled here; run it in an x64 Native Tools prompt.
-
-See `VERIFICATION.md` for executed checks and outstanding release gates.
+**Version:** 0.9.0.0
