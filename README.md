@@ -4,13 +4,15 @@
 Build it on Windows with the .NET Framework 4.8 targeting pack before running it.
 
 
-<img width="1467" height="821" alt="grafik" src="https://github.com/user-attachments/assets/bd46b2a1-af50-4620-80ae-a3b415a95ef2" />
+<img width="1545" height="966" alt="grafik" src="https://github.com/user-attachments/assets/dddb73e3-6cd0-401b-ade6-002e149722e7" />
+
 
 
 ---
 
 
-<img width="1467" height="821" alt="grafik" src="https://github.com/user-attachments/assets/a14f8ef9-b8c4-43c4-a602-1f069e476fed" />
+<img width="1545" height="966" alt="grafik" src="https://github.com/user-attachments/assets/84cda0c1-7a9c-46dd-9ec3-ee59a226ebfb" />
+
 
 
 ---
